@@ -33,3 +33,14 @@ mod kqueue;
     target_os = "openbsd"
 ))]
 pub(crate) use self::kqueue::{event, Event, Events, Selector};
+
+
+#[cfg(any(
+    target_os = "haiku"
+))]
+mod poll;
+
+#[cfg(any(
+    target_os = "haiku"
+))]
+pub(crate) use self::poll::{event, Event, Events, Selector};

@@ -85,6 +85,7 @@ use std::os::unix::io::RawFd;
 #[derive(Debug)]
 pub struct SourceFd<'a>(pub &'a RawFd);
 
+#[cfg(not(target_os = "haiku"))]
 impl<'a> event::Source for SourceFd<'a> {
     fn register(
         &mut self,
@@ -105,6 +106,32 @@ impl<'a> event::Source for SourceFd<'a> {
     }
 
     fn deregister(&mut self, registry: &Registry) -> io::Result<()> {
+        poll::selector(registry).deregister(*self.0)
+    }
+}
+
+#[cfg(target_os = "haiku")]
+impl<'a> event::Source for SourceFd<'a> {
+    #[cfg(target_os = "haiku")]
+    fn register(
+        &mut self,
+        registry: &mut Registry,
+        token: Token,
+        interests: Interest,
+    ) -> io::Result<()> {
+        poll::selector(registry).register(*self.0, token, interests)
+    }
+
+    fn reregister(
+        &mut self,
+        registry: &mut Registry,
+        token: Token,
+        interests: Interest,
+    ) -> io::Result<()> {
+        poll::selector(registry).reregister(*self.0, token, interests)
+    }
+
+    fn deregister(&mut self, registry: &mut Registry) -> io::Result<()> {
         poll::selector(registry).deregister(*self.0)
     }
 }

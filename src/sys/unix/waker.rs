@@ -103,7 +103,8 @@ pub use self::kqueue::Waker;
     target_os = "illumos",
     target_os = "netbsd",
     target_os = "openbsd",
-    target_os = "solaris"
+    target_os = "solaris",
+    target_os = "haiku"
 ))]
 mod pipe {
     use crate::sys::unix::Selector;
@@ -124,9 +125,26 @@ mod pipe {
     }
 
     impl Waker {
+        #[cfg(not(target_os = "haiku"))]
         pub fn new(selector: &Selector, token: Token) -> io::Result<Waker> {
             let mut fds = [-1; 2];
             syscall!(pipe2(fds.as_mut_ptr(), libc::O_NONBLOCK | libc::O_CLOEXEC))?;
+            // Turn the file descriptors into files first so we're ensured
+            // they're closed when dropped, e.g. when register below fails.
+            let sender = unsafe { File::from_raw_fd(fds[1]) };
+            let receiver = unsafe { File::from_raw_fd(fds[0]) };
+            selector
+                .register(fds[0], token, Interest::READABLE)
+                .map(|()| Waker { sender, receiver })
+        }
+
+        #[cfg(target_os = "haiku")]
+        pub fn new(selector: &mut Selector, token: Token) -> io::Result<Waker> {
+            let mut fds = [-1; 2];
+            syscall!(pipe(fds.as_mut_ptr()))?;
+            for &fd in fds.iter() {
+                syscall!(fcntl(fd, libc::F_SETFL, libc::O_NONBLOCK | libc::O_CLOEXEC))?;
+            }
             // Turn the file descriptors into files first so we're ensured
             // they're closed when dropped, e.g. when register below fails.
             let sender = unsafe { File::from_raw_fd(fds[1]) };
@@ -175,6 +193,7 @@ mod pipe {
     target_os = "illumos",
     target_os = "netbsd",
     target_os = "openbsd",
-    target_os = "solaris"
+    target_os = "solaris",
+    target_os = "haiku"
 ))]
 pub use self::pipe::Waker;

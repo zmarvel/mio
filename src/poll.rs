@@ -471,7 +471,120 @@ impl Registry {
     /// }
     /// # }
     /// ```
+    #[cfg(not(target_os = "haiku"))]
     pub fn register<S>(&self, source: &mut S, token: Token, interests: Interest) -> io::Result<()>
+    where
+        S: event::Source + ?Sized,
+    {
+        trace!(
+            "registering event source with poller: token={:?}, interests={:?}",
+            token,
+            interests
+        );
+        source.register(self, token, interests)
+    }
+
+    /// Register an [`event::Source`] with the `Poll` instance.
+    ///
+    /// Once registered, the `Poll` instance will monitor the event source for
+    /// readiness state changes. When it notices a state change, it will return
+    /// a readiness event for the handle the next time [`poll`] is called.
+    ///
+    /// See [`Poll`] docs for a high level overview.
+    ///
+    /// # Arguments
+    ///
+    /// `source: &S: event::Source`: This is the source of events that the
+    /// `Poll` instance should monitor for readiness state changes.
+    ///
+    /// `token: Token`: The caller picks a token to associate with the socket.
+    /// When [`poll`] returns an event for the handle, this token is included.
+    /// This allows the caller to map the event to its source. The token
+    /// associated with the `event::Source` can be changed at any time by
+    /// calling [`reregister`].
+    ///
+    /// See documentation on [`Token`] for an example showing how to pick
+    /// [`Token`] values.
+    ///
+    /// `interest: Interest`: Specifies which operations `Poll` should monitor
+    /// for readiness. `Poll` will only return readiness events for operations
+    /// specified by this argument.
+    ///
+    /// If a socket is registered with readable interest and the socket becomes
+    /// writable, no event will be returned from [`poll`].
+    ///
+    /// The readiness interest for an `event::Source` can be changed at any time
+    /// by calling [`reregister`].
+    ///
+    /// # Notes
+    ///
+    /// Callers must ensure that if a source being registered with a `Poll`
+    /// instance was previously registered with that `Poll` instance, then a
+    /// call to [`deregister`] has already occurred. Consecutive calls to
+    /// `register` is undefined behavior.
+    ///
+    /// Unless otherwise specified, the caller should assume that once an event
+    /// source is registered with a `Poll` instance, it is bound to that `Poll`
+    /// instance for the lifetime of the event source. This remains true even
+    /// if the event source is deregistered from the poll instance using
+    /// [`deregister`].
+    ///
+    /// [`event::Source`]: ./event/trait.Source.html
+    /// [`poll`]: struct.Poll.html#method.poll
+    /// [`reregister`]: struct.Registry.html#method.reregister
+    /// [`deregister`]: struct.Registry.html#method.deregister
+    /// [`Token`]: struct.Token.html
+    ///
+    /// # Examples
+    ///
+    #[cfg_attr(all(feature = "os-poll", features = "net"), doc = "```")]
+    #[cfg_attr(not(all(feature = "os-poll", features = "net")), doc = "```ignore")]
+    /// # use std::error::Error;
+    /// # use std::net;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// use mio::{Events, Poll, Interest, Token};
+    /// use mio::net::TcpStream;
+    /// use std::net::SocketAddr;
+    /// use std::time::{Duration, Instant};
+    ///
+    /// let mut poll = Poll::new()?;
+    ///
+    /// let address: SocketAddr = "127.0.0.1:0".parse()?;
+    /// let listener = net::TcpListener::bind(address)?;
+    /// let mut socket = TcpStream::connect(listener.local_addr()?)?;
+    ///
+    /// // Register the socket with `poll`
+    /// poll.registry().register(
+    ///     &mut socket,
+    ///     Token(0),
+    ///     Interest::READABLE | Interest::WRITABLE)?;
+    ///
+    /// let mut events = Events::with_capacity(1024);
+    /// let start = Instant::now();
+    /// let timeout = Duration::from_millis(500);
+    ///
+    /// loop {
+    ///     let elapsed = start.elapsed();
+    ///
+    ///     if elapsed >= timeout {
+    ///         // Connection timed out
+    ///         return Ok(());
+    ///     }
+    ///
+    ///     let remaining = timeout - elapsed;
+    ///     poll.poll(&mut events, Some(remaining))?;
+    ///
+    ///     for event in &events {
+    ///         if event.token() == Token(0) {
+    ///             // Something (probably) happened on the socket.
+    ///             return Ok(());
+    ///         }
+    ///     }
+    /// }
+    /// # }
+    /// ```
+    #[cfg(target_os = "haiku")]
+    pub fn register<S>(&mut self, source: &mut S, token: Token, interests: Interest) -> io::Result<()>
     where
         S: event::Source + ?Sized,
     {
@@ -539,7 +652,77 @@ impl Registry {
     /// [`register`]: struct.Registry.html#method.register
     /// [`readable`]: ./event/struct.Event.html#is_readable
     /// [`writable`]: ./event/struct.Event.html#is_writable
+    #[cfg(not(target_os = "haiku"))]
     pub fn reregister<S>(&self, source: &mut S, token: Token, interests: Interest) -> io::Result<()>
+    where
+        S: event::Source + ?Sized,
+    {
+        trace!(
+            "reregistering event source with poller: token={:?}, interests={:?}",
+            token,
+            interests
+        );
+        source.reregister(self, token, interests)
+    }
+
+    /// Re-register an [`event::Source`] with the `Poll` instance.
+    ///
+    /// Re-registering an event source allows changing the details of the
+    /// registration. Specifically, it allows updating the associated `token`
+    /// and `interests` specified in previous `register` and `reregister` calls.
+    ///
+    /// The `reregister` arguments fully override the previous values. In other
+    /// words, if a socket is registered with [`readable`] interest and the call
+    /// to `reregister` specifies [`writable`], then read interest is no longer
+    /// requested for the handle.
+    ///
+    /// The event source must have previously been registered with this instance
+    /// of `Poll`, otherwise the behavior is undefined.
+    ///
+    /// See the [`register`] documentation for details about the function
+    /// arguments and see the [`struct`] docs for a high level overview of
+    /// polling.
+    ///
+    /// # Examples
+    ///
+    #[cfg_attr(all(feature = "os-poll", features = "net"), doc = "```")]
+    #[cfg_attr(not(all(feature = "os-poll", features = "net")), doc = "```ignore")]
+    /// # use std::error::Error;
+    /// # use std::net;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// use mio::{Poll, Interest, Token};
+    /// use mio::net::TcpStream;
+    /// use std::net::SocketAddr;
+    ///
+    /// let poll = Poll::new()?;
+    ///
+    /// let address: SocketAddr = "127.0.0.1:0".parse()?;
+    /// let listener = net::TcpListener::bind(address)?;
+    /// let mut socket = TcpStream::connect(listener.local_addr()?)?;
+    ///
+    /// // Register the socket with `poll`, requesting readable
+    /// poll.registry().register(
+    ///     &mut socket,
+    ///     Token(0),
+    ///     Interest::READABLE)?;
+    ///
+    /// // Reregister the socket specifying write interest instead. Even though
+    /// // the token is the same it must be specified.
+    /// poll.registry().reregister(
+    ///     &mut socket,
+    ///     Token(0),
+    ///     Interest::WRITABLE)?;
+    /// #     Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [`event::Source`]: ./event/trait.Source.html
+    /// [`struct`]: struct.Poll.html
+    /// [`register`]: struct.Registry.html#method.register
+    /// [`readable`]: ./event/struct.Event.html#is_readable
+    /// [`writable`]: ./event/struct.Event.html#is_writable
+    #[cfg(target_os = "haiku")]
+    pub fn reregister<S>(&mut self, source: &mut S, token: Token, interests: Interest) -> io::Result<()>
     where
         S: event::Source + ?Sized,
     {
@@ -602,7 +785,68 @@ impl Registry {
     /// #     Ok(())
     /// # }
     /// ```
+    #[cfg(not(target_os = "haiku"))]
     pub fn deregister<S>(&self, source: &mut S) -> io::Result<()>
+    where
+        S: event::Source + ?Sized,
+    {
+        trace!("deregistering event source from poller");
+        source.deregister(self)
+    }
+
+    /// Deregister an [`event::Source`] with the `Poll` instance.
+    ///
+    /// When an event source is deregistered, the `Poll` instance will no longer
+    /// monitor it for readiness state changes. Deregistering clears up any
+    /// internal resources needed to track the handle.  After an explicit call
+    /// to this method completes, it is guaranteed that the token previously
+    /// registered to this handle will not be returned by a future poll, so long
+    /// as a happens-before relationship is established between this call and
+    /// the poll.
+    ///
+    /// The event source must have previously been registered with this instance
+    /// of `Poll`, otherwise the behavior is undefined.
+    ///
+    /// A handle can be passed back to `register` after it has been
+    /// deregistered; however, it must be passed back to the **same** `Poll`
+    /// instance, otherwise the behavior is undefined.
+    ///
+    /// # Examples
+    ///
+    #[cfg_attr(all(feature = "os-poll", features = "net"), doc = "```")]
+    #[cfg_attr(not(all(feature = "os-poll", features = "net")), doc = "```ignore")]
+    /// # use std::error::Error;
+    /// # use std::net;
+    /// # fn main() -> Result<(), Box<dyn Error>> {
+    /// use mio::{Events, Poll, Interest, Token};
+    /// use mio::net::TcpStream;
+    /// use std::net::SocketAddr;
+    /// use std::time::Duration;
+    ///
+    /// let mut poll = Poll::new()?;
+    ///
+    /// let address: SocketAddr = "127.0.0.1:0".parse()?;
+    /// let listener = net::TcpListener::bind(address)?;
+    /// let mut socket = TcpStream::connect(listener.local_addr()?)?;
+    ///
+    /// // Register the socket with `poll`
+    /// poll.registry().register(
+    ///     &mut socket,
+    ///     Token(0),
+    ///     Interest::READABLE)?;
+    ///
+    /// poll.registry().deregister(&mut socket)?;
+    ///
+    /// let mut events = Events::with_capacity(1024);
+    ///
+    /// // Set a timeout because this poll should never receive any events.
+    /// poll.poll(&mut events, Some(Duration::from_secs(1)))?;
+    /// assert!(events.is_empty());
+    /// #     Ok(())
+    /// # }
+    /// ```
+    #[cfg(target_os = "haiku")]
+    pub fn deregister<S>(&mut self, source: &mut S) -> io::Result<()>
     where
         S: event::Source + ?Sized,
     {
@@ -644,8 +888,14 @@ impl AsRawFd for Registry {
 }
 
 /// Get access to the `sys::Selector` from `Registry`.
+#[cfg(not(target_os = "haiku"))]
 pub(crate) fn selector(registry: &Registry) -> &sys::Selector {
     &registry.selector
+}
+
+#[cfg(target_os = "haiku")]
+pub(crate) fn selector(registry: &mut Registry) -> &mut sys::Selector {
+    &mut registry.selector
 }
 
 cfg_os_poll! {

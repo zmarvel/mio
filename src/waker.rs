@@ -81,10 +81,19 @@ pub struct Waker {
 
 impl Waker {
     /// Create a new `Waker`.
+    #[cfg(not(target_os = "haiku"))]
     pub fn new(registry: &Registry, token: Token) -> io::Result<Waker> {
         #[cfg(debug_assertions)]
         registry.register_waker();
         sys::Waker::new(poll::selector(&registry), token).map(|inner| Waker { inner })
+    }
+
+    /// Create a new `Waker`.
+    #[cfg(target_os = "haiku")]
+    pub fn new(registry: &mut Registry, token: Token) -> io::Result<Waker> {
+        #[cfg(debug_assertions)]
+        registry.register_waker();
+        sys::Waker::new(poll::selector(registry), token).map(|inner| Waker { inner })
     }
 
     /// Wake up the [`Poll`] associated with this `Waker`.
